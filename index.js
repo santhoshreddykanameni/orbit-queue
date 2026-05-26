@@ -1,6 +1,6 @@
-const { createClient } = require("./core/QueueFactory");
+const { createClient } = require("./src/core/QueueFactory");
 
-const BatchManager = require("./batching/BatchManager");
+const BatchManager = require("./src/batching/BatchManager");
 
 module.exports = {
   createClient,
