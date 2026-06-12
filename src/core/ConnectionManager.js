@@ -8,7 +8,7 @@ class ConnectionManager extends EventEmitter {
 
     this.retries = 0;
 
-    this.reconnecting = false;
+    this.reconnectTimer = null;
 
     this.maxRetries = config.reconnect?.retries ?? Infinity;
 
@@ -27,24 +27,36 @@ class ConnectionManager extends EventEmitter {
 
       this.retries = 0;
 
-      this.reconnecting = false;
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+
+        this.reconnectTimer = null;
+      }
 
       this.emit("connected");
     } catch (err) {
-      this.emit("error", err);
+      if (this.listenerCount("error") > 0) {
+        this.emit("error", err);
+      } else {
+        console.error("[orbit-queue]", err.message);
+      }
 
       this.scheduleReconnect();
     }
   }
 
   scheduleReconnect() {
-    if (this.reconnecting) return;
-
-    if (this.retries >= this.maxRetries) {
+    // already scheduled
+    if (this.reconnectTimer) {
       return;
     }
 
-    this.reconnecting = true;
+    // max retries reached
+    if (this.retries >= this.maxRetries) {
+      console.error("[orbit-queue] Max reconnect retries reached");
+
+      return;
+    }
 
     const delay = Math.min(
       this.minDelay * Math.pow(this.factor, this.retries),
@@ -55,9 +67,20 @@ class ConnectionManager extends EventEmitter {
 
     this.emit("reconnecting", delay);
 
-    setTimeout(() => {
-      this.connect();
+    this.reconnectTimer = setTimeout(async () => {
+      // clear timer BEFORE connect
+      this.reconnectTimer = null;
+
+      await this.connect();
     }, delay);
+  }
+
+  close() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+
+      this.reconnectTimer = null;
+    }
   }
 }
 

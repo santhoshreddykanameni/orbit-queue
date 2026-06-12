@@ -65,7 +65,24 @@ class QueueClient extends EventEmitter {
     this.persistentQueue = new PersistentQueue(this.config.persistence);
   }
 
+  /* -------------------------------------------------- */
+  /* ---------------- SAFE ERROR EMIT ----------------- */
+  /* -------------------------------------------------- */
+
+  safeEmitError(err) {
+    if (this.listenerCount("error") > 0) {
+      this.emit("error", err);
+    } else {
+      console.error("[orbit-queue]", err);
+    }
+  }
+
+  /* -------------------------------------------------- */
+  /* ---------------- PUBLISH ------------------------- */
+  /* -------------------------------------------------- */
+
   async publish(queue, message, options = {}) {
+    // buffer if disconnected
     if (!this.connected) {
       const item = {
         queue,
@@ -84,32 +101,80 @@ class QueueClient extends EventEmitter {
       return;
     }
 
-    return this._publishNow(queue, message, options);
+    // try immediate publish
+    try {
+      return await this._publishNow(queue, message, options);
+    } catch (err) {
+      this.safeEmitError(err);
+
+      // re-buffer on failure
+      const item = {
+        queue,
+        message,
+        options,
+      };
+
+      if (this.config.persistence?.enabled) {
+        this.persistentQueue.push(item);
+      } else {
+        this.offlineQueue.push(item);
+      }
+    }
   }
+
+  /* -------------------------------------------------- */
+  /* ---------------- FLUSH OFFLINE ------------------- */
+  /* -------------------------------------------------- */
 
   async flushOfflineQueue() {
     await this.offlineQueue.drain(async (items) => {
       for (const item of items) {
-        await this._publishNow(item.queue, item.message, item.options);
+        try {
+          await this._publishNow(item.queue, item.message, item.options);
+        } catch (err) {
+          this.safeEmitError(err);
+
+          // re-buffer failed item
+          this.offlineQueue.push(item);
+        }
       }
 
       this.emit("offlineQueueFlushed", items.length);
     });
   }
 
+  /* -------------------------------------------------- */
+  /* ---------------- FLUSH PERSISTENT ---------------- */
+  /* -------------------------------------------------- */
+
   async flushPersistentQueue() {
     await this.persistentQueue.drain(async (items) => {
       for (const item of items) {
-        await this._publishNow(item.queue, item.message, item.options);
+        try {
+          await this._publishNow(item.queue, item.message, item.options);
+        } catch (err) {
+          this.safeEmitError(err);
+
+          // re-buffer failed item
+          this.persistentQueue.push(item);
+        }
       }
 
       this.emit("persistentQueueFlushed", items.length);
     });
   }
 
+  /* -------------------------------------------------- */
+  /* ---------------- RESTORE SUBSCRIPTIONS ----------- */
+  /* -------------------------------------------------- */
+
   async restoreSubscriptions() {
     for (const [queue, handler] of this.subscriptions) {
-      await this.subscribe(queue, handler, true);
+      try {
+        await this.subscribe(queue, handler, true);
+      } catch (err) {
+        this.safeEmitError(err);
+      }
     }
   }
 }

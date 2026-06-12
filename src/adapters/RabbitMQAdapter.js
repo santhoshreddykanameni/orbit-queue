@@ -36,7 +36,7 @@ class RabbitMQAdapter extends QueueClient {
       });
 
       this.conn.on("error", (err) => {
-        this.emit("error", err);
+        this.safeEmitError(err);
       });
 
       this.conn.on("close", async () => {
@@ -72,6 +72,8 @@ class RabbitMQAdapter extends QueueClient {
     }, this.config);
 
     this.connectionManager.on("connected", async () => {
+      this.warningShown = false;
+
       try {
         this.connected = true;
 
@@ -83,7 +85,7 @@ class RabbitMQAdapter extends QueueClient {
 
         this.emit("connected");
       } catch (err) {
-        this.emit("error", err);
+        this.safeEmitError(err);
 
         this.connectionManager.scheduleReconnect();
       }
@@ -105,13 +107,23 @@ class RabbitMQAdapter extends QueueClient {
       if (this._closing) return;
 
       if (!this.conn) {
-        this.emit("warning", "RabbitMQ connection missing");
+        if (!this.warningShown) {
+          this.warningShown = true;
+
+          this.emit("warning", "RabbitMQ connection missing");
+        }
 
         this.connectionManager.scheduleReconnect();
+
+        return;
       }
 
       if (!this.consumeChannel) {
-        this.emit("warning", "Consumer channel missing");
+        if (!this.warningShown) {
+          this.warningShown = true;
+
+          this.emit("warning", "Consumer channel missing");
+        }
 
         this.connectionManager.scheduleReconnect();
       }
@@ -160,9 +172,7 @@ class RabbitMQAdapter extends QueueClient {
         },
       );
     } catch (err) {
-      this.emit("error", err);
-
-      throw err;
+      this.safeEmitError(err);
     }
   }
 
@@ -181,7 +191,9 @@ class RabbitMQAdapter extends QueueClient {
 
     await this.assertQueue(queue);
 
-    const result = await this.consumeChannel.consume(
+    const channel = this.consumeChannel;
+
+    const result = await channel.consume(
       queue,
       async (msg) => {
         if (!msg) return;
@@ -191,11 +203,15 @@ class RabbitMQAdapter extends QueueClient {
 
           await handler(data);
 
-          this.consumeChannel.ack(msg);
+          try {
+            channel.ack(msg);
+          } catch {}
         } catch (err) {
-          this.emit("error", err);
+          this.safeEmitError(err);
 
-          this.consumeChannel.nack(msg, false, false);
+          try {
+            channel.nack(msg, false, false);
+          } catch {}
         }
       },
       {
@@ -236,7 +252,7 @@ class RabbitMQAdapter extends QueueClient {
         this.conn = null;
       }
     } catch (err) {
-      this.emit("error", err);
+      this.safeEmitError(err);
     }
 
     this.connected = false;
