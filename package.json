@@ -1,6 +1,6 @@
 {
   "name": "@orbit-stream/message-queue",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "message-queue is a flexible and lightweight Node.js package that provides a unified interface for working with multiple message queue providers. Currently, it supports both RabbitMQ and Amazon SQS, allowing developers to easily publish, consume, acknowledge, and manage messages without vendor-specific complexity.",
   "main": "index.js",
   "types": "index.d.ts",

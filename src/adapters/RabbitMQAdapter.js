@@ -6,7 +6,18 @@ const ConnectionManager = require("../core/ConnectionManager");
 
 class RabbitMQAdapter extends QueueClient {
   constructor(config) {
-    super(config);
+    super({
+      queueType: "quorum",
+      ...config,
+    });
+
+    const allowed = ["classic", "quorum"];
+
+    if (!allowed.includes(this.config.queueType)) {
+      throw new Error(
+        `Invalid queueType "${this.config.queueType}". Allowed values: classic, quorum`,
+      );
+    }
 
     this.conn = null;
 
@@ -145,9 +156,17 @@ class RabbitMQAdapter extends QueueClient {
   async assertQueue(queue) {
     if (this.queues.has(queue)) return;
 
-    await this.consumeChannel.assertQueue(queue, {
+    const options = {
       durable: true,
-    });
+    };
+
+    if (this.config.queueType === "quorum") {
+      options.arguments = {
+        "x-queue-type": "quorum",
+      };
+    }
+
+    await this.consumeChannel.assertQueue(queue, options);
 
     this.queues.add(queue);
   }
